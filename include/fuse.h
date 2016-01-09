@@ -13,13 +13,21 @@
  *
  * This file defines the library interface of FUSE
  *
- * IMPORTANT: you should define FUSE_USE_VERSION before including this header.
+ * IMPORTANT: you should define FUSE_USE_VERSION before including this
+ * header.  To use the newest API define it to 26 (recommended for any
+ * new application), to use the old API define it to 21 (default) 22
+ * or 25, to use the even older 1.X API define it to 11.
  */
+
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 21
+#endif
 
 #include "fuse_common.h"
 
 #include <fcntl.h>
 #include <time.h>
+#include <utime.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
@@ -36,33 +44,8 @@ extern "C" {
 /** Handle for a FUSE filesystem */
 struct fuse;
 
-/**
- * Readdir flags, passed to ->readdir()
- */
-enum fuse_readdir_flags {
-	/**
-	 * "Plus" mode.
-	 *
-	 * The kernel wants to prefill the inode cache during readdir.  The
-	 * filesystem may honour this by filling in the attributes and setting
-	 * FUSE_FILL_DIR_FLAGS for the filler function.  The filesystem may also
-	 * just ignore this flag completely.
-	 */
-	FUSE_READDIR_PLUS = (1 << 0),
-};
-
-enum fuse_fill_dir_flags {
-	/**
-	 * "Plus" mode: all file attributes are valid
-	 *
-	 * The attributes are used by the kernel to prefill the inode cache
-	 * during a readdir.
-	 *
-	 * It is okay to set FUSE_FILL_DIR_PLUS if FUSE_READDIR_PLUS is not set
-	 * and vice versa.
-	 */
-	FUSE_FILL_DIR_PLUS = (1 << 1),
-};
+/** Structure containing a raw command */
+struct fuse_cmd;
 
 /** Function to add an entry in a readdir() operation
  *
@@ -70,12 +53,15 @@ enum fuse_fill_dir_flags {
  * @param name the file name of the directory entry
  * @param stat file attributes, can be NULL
  * @param off offset of the next entry or zero
- * @param flags fill flags
  * @return 1 if buffer is full, zero otherwise
  */
 typedef int (*fuse_fill_dir_t) (void *buf, const char *name,
-				const struct stat *stbuf, off_t off,
-				enum fuse_fill_dir_flags flags);
+				const struct stat *stbuf, off_t off);
+
+/* Used by deprecated getdir() method */
+typedef struct fuse_dirhandle *fuse_dirh_t;
+typedef int (*fuse_dirfil_t) (fuse_dirh_t h, const char *name, int type,
+			      ino_t ino);
 
 /**
  * The file system operations:
@@ -100,24 +86,6 @@ typedef int (*fuse_fill_dir_t) (void *buf, const char *name,
  * is also a snapshot of the relevant wiki pages in the doc/ folder.
  */
 struct fuse_operations {
-	/**
-	 * Flag indicating that the path need not be calculated for
-	 * the following operations:
-	 *
-	 * read, write, flush, release, fsync, readdir, releasedir,
-	 * fsyncdir, ftruncate, fgetattr, lock, ioctl and poll
-	 *
-	 * If this flag is set then the path will not be calculaged even if the
-	 * file wasn't unlinked.  However the path can still be non-NULL if it
-	 * needs to be calculated for some other reason.
-	 */
-	unsigned int flag_nopath:1;
-
-	/**
-	 * Reserved flags, don't set
-	 */
-	unsigned int flag_reserved:31;
-
 	/** Get file attributes.
 	 *
 	 * Similar to stat().  The 'st_dev' and 'st_blksize' fields are
@@ -136,6 +104,9 @@ struct fuse_operations {
 	 */
 	int (*readlink) (const char *, char *, size_t);
 
+	/* Deprecated, use readdir() instead */
+	int (*getdir) (const char *, fuse_dirh_t, fuse_dirfil_t);
+
 	/** Create a file node
 	 *
 	 * This is called for creation of all non-directory, non-symlink
@@ -144,7 +115,7 @@ struct fuse_operations {
 	 */
 	int (*mknod) (const char *, mode_t, dev_t);
 
-	/** Create a directory
+	/** Create a directory 
 	 *
 	 * Note that the mode argument may not have the type specification
 	 * bits set, i.e. S_ISDIR(mode) can be false.  To obtain the
@@ -162,7 +133,7 @@ struct fuse_operations {
 	int (*symlink) (const char *, const char *);
 
 	/** Rename a file */
-	int (*rename) (const char *, const char *, unsigned int);
+	int (*rename) (const char *, const char *);
 
 	/** Create a hard link to a file */
 	int (*link) (const char *, const char *);
@@ -175,6 +146,12 @@ struct fuse_operations {
 
 	/** Change the size of a file */
 	int (*truncate) (const char *, off_t);
+
+	/** Change the access and/or modification times of a file
+	 *
+	 * Deprecated, use utimens() instead.
+	 */
+	int (*utime) (const char *, struct utimbuf *);
 
 	/** File open operation
 	 *
@@ -305,12 +282,16 @@ struct fuse_operations {
 
 	/** Read directory
 	 *
+	 * This supersedes the old getdir() interface.  New applications
+	 * should use this.
+	 *
 	 * The filesystem may choose between two modes of operation:
 	 *
 	 * 1) The readdir implementation ignores the offset parameter, and
 	 * passes zero to the filler function's offset.  The filler
 	 * function will not return '1' (unless an error happens), so the
-	 * whole directory is read in a single readdir operation.
+	 * whole directory is read in a single readdir operation.  This
+	 * works just like the old getdir() method.
 	 *
 	 * 2) The readdir implementation keeps track of the offsets of the
 	 * directory entries.  It uses the offset parameter and always
@@ -319,10 +300,9 @@ struct fuse_operations {
 	 * '1'.
 	 *
 	 * Introduced in version 2.3
-	 * The "flags" argument added in version 3.0
 	 */
 	int (*readdir) (const char *, void *, fuse_fill_dir_t, off_t,
-			struct fuse_file_info *, enum fuse_readdir_flags);
+			struct fuse_file_info *);
 
 	/** Release directory
 	 *
@@ -474,6 +454,43 @@ struct fuse_operations {
 	int (*bmap) (const char *, size_t blocksize, uint64_t *idx);
 
 	/**
+	 * Flag indicating that the filesystem can accept a NULL path
+	 * as the first argument for the following operations:
+	 *
+	 * read, write, flush, release, fsync, readdir, releasedir,
+	 * fsyncdir, ftruncate, fgetattr, lock, ioctl and poll
+	 *
+	 * If this flag is set these operations continue to work on
+	 * unlinked files even if "-ohard_remove" option was specified.
+	 */
+	unsigned int flag_nullpath_ok:1;
+
+	/**
+	 * Flag indicating that the path need not be calculated for
+	 * the following operations:
+	 *
+	 * read, write, flush, release, fsync, readdir, releasedir,
+	 * fsyncdir, ftruncate, fgetattr, lock, ioctl and poll
+	 *
+	 * Closely related to flag_nullpath_ok, but if this flag is
+	 * set then the path will not be calculaged even if the file
+	 * wasn't unlinked.  However the path can still be non-NULL if
+	 * it needs to be calculated for some other reason.
+	 */
+	unsigned int flag_nopath:1;
+
+	/**
+	 * Flag indicating that the filesystem accepts special
+	 * UTIME_NOW and UTIME_OMIT values in its utimens operation.
+	 */
+	unsigned int flag_utime_omit_ok:1;
+
+	/**
+	 * Reserved flags, don't set
+	 */
+	unsigned int flag_reserved:29;
+
+	/**
 	 * Ioctl
 	 *
 	 * flags will have FUSE_IOCTL_COMPAT set for 32bit ioctls in
@@ -623,8 +640,6 @@ struct fuse_context {
  * @param op the file system operation
  * @param user_data user data supplied in the context during the init() method
  * @return 0 on success, nonzero on failure
- *
- * Example usage, see hello.c
  */
 /*
   int fuse_main(int argc, char *argv[], const struct fuse_operations *op,
@@ -671,8 +686,6 @@ void fuse_destroy(struct fuse *f);
  *
  * @param f the FUSE handle
  * @return 0 if no error occurred, -1 otherwise
- *
- * See also: fuse_loop()
  */
 int fuse_loop(struct fuse *f);
 
@@ -693,24 +706,8 @@ void fuse_exit(struct fuse *f);
  * Calling this function requires the pthreads library to be linked to
  * the application.
  *
- * Note: using fuse_loop() instead of fuse_loop_mt() means you are running in
- * single-threaded mode, and that you will not have to worry about reentrancy,
- * though you will have to worry about recursive lookups. In single-threaded
- * mode, FUSE will wait for one callback to return before calling another.
- *
- * Enabling multiple threads, by using fuse_loop_mt(), will cause FUSE to make
- * multiple simultaneous calls into the various callback functions given by your
- * fuse_operations record.
- *
- * If you are using multiple threads, you can enjoy all the parallel execution
- * and interactive response benefits of threads, and you get to enjoy all the
- * benefits of race conditions and locking bugs, too. Ensure that any code used
- * in the callback funtion of fuse_operations is also thread-safe.
- *
  * @param f the FUSE handle
  * @return 0 if no error occurred, -1 otherwise
- *
- * See also: fuse_loop()
  */
 int fuse_loop_mt(struct fuse *f);
 
@@ -750,6 +747,16 @@ int fuse_getgroups(int size, gid_t list[]);
  * @return 1 if the request has been interrupted, 0 otherwise
  */
 int fuse_interrupted(void);
+
+/**
+ * Obsolete, doesn't do anything
+ *
+ * @return -EINVAL
+ */
+int fuse_invalidate(struct fuse *f, const char *path);
+
+/* Deprecated, don't use */
+int fuse_is_lib_option(const char *opt);
 
 /**
  * The real main function
@@ -811,7 +818,7 @@ int fuse_fs_getattr(struct fuse_fs *fs, const char *path, struct stat *buf);
 int fuse_fs_fgetattr(struct fuse_fs *fs, const char *path, struct stat *buf,
 		     struct fuse_file_info *fi);
 int fuse_fs_rename(struct fuse_fs *fs, const char *oldpath,
-		   const char *newpath, unsigned int flags);
+		   const char *newpath);
 int fuse_fs_unlink(struct fuse_fs *fs, const char *path);
 int fuse_fs_rmdir(struct fuse_fs *fs, const char *path);
 int fuse_fs_symlink(struct fuse_fs *fs, const char *linkname,
@@ -840,7 +847,7 @@ int fuse_fs_opendir(struct fuse_fs *fs, const char *path,
 		    struct fuse_file_info *fi);
 int fuse_fs_readdir(struct fuse_fs *fs, const char *path, void *buf,
 		    fuse_fill_dir_t filler, off_t off,
-		    struct fuse_file_info *fi, enum fuse_readdir_flags flags);
+		    struct fuse_file_info *fi);
 int fuse_fs_fsyncdir(struct fuse_fs *fs, const char *path, int datasync,
 		     struct fuse_file_info *fi);
 int fuse_fs_releasedir(struct fuse_fs *fs, const char *path,
@@ -901,36 +908,151 @@ struct fuse_fs *fuse_fs_new(const struct fuse_operations *op, size_t op_size,
 			    void *user_data);
 
 /**
- * Factory for creating filesystem objects
+ * Filesystem module
  *
- * The function may use and remove options from 'args' that belong
- * to this module.
+ * Filesystem modules are registered with the FUSE_REGISTER_MODULE()
+ * macro.
  *
- * For now the 'fs' vector always contains exactly one filesystem.
- * This is the filesystem which will be below the newly created
- * filesystem in the stack.
- *
- * @param args the command line arguments
- * @param fs NULL terminated filesystem object vector
- * @return the new filesystem object
+ * If the "-omodules=modname:..." option is present, filesystem
+ * objects are created and pushed onto the stack with the 'factory'
+ * function.
  */
-typedef struct fuse_fs *(*fuse_module_factory_t)(struct fuse_args *args,
-						 struct fuse_fs *fs[]);
+struct fuse_module {
+	/**
+	 * Name of filesystem
+	 */
+	const char *name;
+
+	/**
+	 * Factory for creating filesystem objects
+	 *
+	 * The function may use and remove options from 'args' that belong
+	 * to this module.
+	 *
+	 * For now the 'fs' vector always contains exactly one filesystem.
+	 * This is the filesystem which will be below the newly created
+	 * filesystem in the stack.
+	 *
+	 * @param args the command line arguments
+	 * @param fs NULL terminated filesystem object vector
+	 * @return the new filesystem object
+	 */
+	struct fuse_fs *(*factory)(struct fuse_args *args,
+				   struct fuse_fs *fs[]);
+
+	struct fuse_module *next;
+	struct fusemod_so *so;
+	int ctr;
+};
+
+/**
+ * Register a filesystem module
+ *
+ * This function is used by FUSE_REGISTER_MODULE and there's usually
+ * no need to call it directly
+ */
+void fuse_register_module(struct fuse_module *mod);
+
 /**
  * Register filesystem module
  *
- * If the "-omodules=@name_:..." option is present, filesystem
- * objects are created and pushed onto the stack with the @factory_
- * function.
- *
- * @name_ the name of this filesystem module
- * @factory_ the factory function for this filesystem module
+ * For the parameters, see description of the fields in 'struct
+ * fuse_module'
  */
-#define FUSE_REGISTER_MODULE(name_, factory_) \
-	fuse_module_factory_t fuse_module_ ## name_ ## _factory = factory_;
+#define FUSE_REGISTER_MODULE(name_, factory_)				  \
+	static __attribute__((constructor)) void name_ ## _register(void) \
+	{								  \
+		static struct fuse_module mod =				  \
+			{ #name_, factory_, NULL, NULL, 0 };		  \
+		fuse_register_module(&mod);				  \
+	}
+
+
+/* ----------------------------------------------------------- *
+ * Advanced API for event handling, don't worry about this...  *
+ * ----------------------------------------------------------- */
+
+/* NOTE: the following functions are deprecated, and will be removed
+   from the 3.0 API.  Use the lowlevel session functions instead */
+
+/** Function type used to process commands */
+typedef void (*fuse_processor_t)(struct fuse *, struct fuse_cmd *, void *);
+
+/** This is the part of fuse_main() before the event loop */
+struct fuse *fuse_setup(int argc, char *argv[],
+			const struct fuse_operations *op, size_t op_size,
+			char **mountpoint, int *multithreaded,
+			void *user_data);
+
+/** This is the part of fuse_main() after the event loop */
+void fuse_teardown(struct fuse *fuse, char *mountpoint);
+
+/** Read a single command.  If none are read, return NULL */
+struct fuse_cmd *fuse_read_cmd(struct fuse *f);
+
+/** Process a single command */
+void fuse_process_cmd(struct fuse *f, struct fuse_cmd *cmd);
+
+/** Multi threaded event loop, which calls the custom command
+    processor function */
+int fuse_loop_mt_proc(struct fuse *f, fuse_processor_t proc, void *data);
+
+/** Return the exited flag, which indicates if fuse_exit() has been
+    called */
+int fuse_exited(struct fuse *f);
+
+/** This function is obsolete and implemented as a no-op */
+void fuse_set_getcontext_func(struct fuse_context *(*func)(void));
 
 /** Get session from fuse object */
 struct fuse_session *fuse_get_session(struct fuse *f);
+
+/* ----------------------------------------------------------- *
+ * Compatibility stuff					       *
+ * ----------------------------------------------------------- */
+
+#if FUSE_USE_VERSION < 26
+#  include "fuse_compat.h"
+#  undef fuse_main
+#  if FUSE_USE_VERSION == 25
+#    define fuse_main(argc, argv, op)				\
+	fuse_main_real_compat25(argc, argv, op, sizeof(*(op)))
+#    define fuse_new fuse_new_compat25
+#    define fuse_setup fuse_setup_compat25
+#    define fuse_teardown fuse_teardown_compat22
+#    define fuse_operations fuse_operations_compat25
+#  elif FUSE_USE_VERSION == 22
+#    define fuse_main(argc, argv, op)				\
+	fuse_main_real_compat22(argc, argv, op, sizeof(*(op)))
+#    define fuse_new fuse_new_compat22
+#    define fuse_setup fuse_setup_compat22
+#    define fuse_teardown fuse_teardown_compat22
+#    define fuse_operations fuse_operations_compat22
+#    define fuse_file_info fuse_file_info_compat
+#  elif FUSE_USE_VERSION == 24
+#    error Compatibility with high-level API version 24 not supported
+#  else
+#    define fuse_dirfil_t fuse_dirfil_t_compat
+#    define __fuse_read_cmd fuse_read_cmd
+#    define __fuse_process_cmd fuse_process_cmd
+#    define __fuse_loop_mt fuse_loop_mt_proc
+#    if FUSE_USE_VERSION == 21
+#      define fuse_operations fuse_operations_compat2
+#      define fuse_main fuse_main_compat2
+#      define fuse_new fuse_new_compat2
+#      define __fuse_setup fuse_setup_compat2
+#      define __fuse_teardown fuse_teardown_compat22
+#      define __fuse_exited fuse_exited
+#      define __fuse_set_getcontext_func fuse_set_getcontext_func
+#    else
+#      define fuse_statfs fuse_statfs_compat1
+#      define fuse_operations fuse_operations_compat1
+#      define fuse_main fuse_main_compat1
+#      define fuse_new fuse_new_compat1
+#      define FUSE_DEBUG FUSE_DEBUG_COMPAT1
+#    endif
+#  endif
+#endif
 
 #ifdef __cplusplus
 }

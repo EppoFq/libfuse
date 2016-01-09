@@ -6,7 +6,6 @@
   See the file COPYING.LIB.
 */
 
-#include "config.h"
 #include "fuse_lowlevel.h"
 #include "fuse_misc.h"
 #include "fuse_kernel.h"
@@ -20,7 +19,6 @@
 #include <semaphore.h>
 #include <errno.h>
 #include <sys/time.h>
-#include <sys/ioctl.h>
 
 /* Environment var controlling the thread stack size */
 #define ENVNAME_THREAD_STACK "FUSE_THREAD_STACK"
@@ -30,8 +28,7 @@ struct fuse_worker {
 	struct fuse_worker *next;
 	pthread_t thread_id;
 	size_t bufsize;
-	struct fuse_buf fbuf;
-	struct fuse_chan *ch;
+	char *buf;
 	struct fuse_mt *mt;
 };
 
@@ -73,10 +70,15 @@ static void *fuse_do_work(void *data)
 
 	while (!fuse_session_exited(mt->se)) {
 		int isforget = 0;
+		struct fuse_chan *ch = mt->prevch;
+		struct fuse_buf fbuf = {
+			.mem = w->buf,
+			.size = w->bufsize,
+		};
 		int res;
 
 		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-		res = fuse_session_receive_buf(mt->se, &w->fbuf, w->ch);
+		res = fuse_session_receive_buf(mt->se, &fbuf, &ch);
 		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 		if (res == -EINTR)
 			continue;
@@ -98,8 +100,8 @@ static void *fuse_do_work(void *data)
 		 * This disgusting hack is needed so that zillions of threads
 		 * are not created on a burst of FORGET messages
 		 */
-		if (!(w->fbuf.flags & FUSE_BUF_IS_FD)) {
-			struct fuse_in_header *in = w->fbuf.mem;
+		if (!(fbuf.flags & FUSE_BUF_IS_FD)) {
+			struct fuse_in_header *in = fbuf.mem;
 
 			if (in->opcode == FUSE_FORGET ||
 			    in->opcode == FUSE_BATCH_FORGET)
@@ -112,7 +114,7 @@ static void *fuse_do_work(void *data)
 			fuse_loop_start_thread(mt);
 		pthread_mutex_unlock(&mt->lock);
 
-		fuse_session_process_buf(mt->se, &w->fbuf, w->ch);
+		fuse_session_process_buf(mt->se, &fbuf, ch);
 
 		pthread_mutex_lock(&mt->lock);
 		if (!isforget)
@@ -128,8 +130,7 @@ static void *fuse_do_work(void *data)
 			pthread_mutex_unlock(&mt->lock);
 
 			pthread_detach(w->thread_id);
-			free(w->fbuf.mem);
-			fuse_chan_put(w->ch);
+			free(w->buf);
 			free(w);
 			return NULL;
 		}
@@ -174,67 +175,27 @@ int fuse_start_thread(pthread_t *thread_id, void *(*func)(void *), void *arg)
 	return 0;
 }
 
-static struct fuse_chan *fuse_clone_chan(struct fuse_mt *mt)
-{
-	int res;
-	int clonefd;
-	uint32_t masterfd;
-	struct fuse_chan *newch;
-	const char *devname = "/dev/fuse";
-
-#ifndef O_CLOEXEC
-#define O_CLOEXEC 0
-#endif
-	clonefd = open(devname, O_RDWR | O_CLOEXEC);
-	if (clonefd == -1) {
-		fprintf(stderr, "fuse: failed to open %s: %s\n", devname,
-			strerror(errno));
-		return NULL;
-	}
-	fcntl(clonefd, F_SETFD, FD_CLOEXEC);
-
-	masterfd = fuse_chan_fd(mt->prevch);
-	res = ioctl(clonefd, FUSE_DEV_IOC_CLONE, &masterfd);
-	if (res == -1) {
-		fprintf(stderr, "fuse: failed to clone device fd: %s\n",
-			strerror(errno));
-		close(clonefd);
-		mt->se->f->clone_fd = 0;
-
-		return fuse_chan_get(mt->prevch);
-	}
-	newch = fuse_chan_new(clonefd);
-	if (newch == NULL)
-		close(clonefd);
-
-	return newch;
-}
-
 static int fuse_loop_start_thread(struct fuse_mt *mt)
 {
 	int res;
-
 	struct fuse_worker *w = malloc(sizeof(struct fuse_worker));
 	if (!w) {
 		fprintf(stderr, "fuse: failed to allocate worker structure\n");
 		return -1;
 	}
 	memset(w, 0, sizeof(struct fuse_worker));
-	w->fbuf.mem = NULL;
+	w->bufsize = fuse_chan_bufsize(mt->prevch);
+	w->buf = malloc(w->bufsize);
 	w->mt = mt;
-
-
-	if (mt->se->f->clone_fd) {
-		w->ch = fuse_clone_chan(mt);
-		if (!w->ch)
-			return -1;
-	} else {
-		w->ch = fuse_chan_get(mt->prevch);
+	if (!w->buf) {
+		fprintf(stderr, "fuse: failed to allocate read buffer\n");
+		free(w);
+		return -1;
 	}
 
 	res = fuse_start_thread(&w->thread_id, fuse_do_work, w);
 	if (res == -1) {
-		fuse_chan_put(w->ch);
+		free(w->buf);
 		free(w);
 		return -1;
 	}
@@ -251,8 +212,7 @@ static void fuse_join_worker(struct fuse_mt *mt, struct fuse_worker *w)
 	pthread_mutex_lock(&mt->lock);
 	list_del_worker(w);
 	pthread_mutex_unlock(&mt->lock);
-	free(w->fbuf.mem);
-	fuse_chan_put(w->ch);
+	free(w->buf);
 	free(w);
 }
 
@@ -264,7 +224,7 @@ int fuse_session_loop_mt(struct fuse_session *se)
 
 	memset(&mt, 0, sizeof(struct fuse_mt));
 	mt.se = se;
-	mt.prevch = fuse_session_chan(se);
+	mt.prevch = fuse_session_next_chan(se, NULL);
 	mt.error = 0;
 	mt.numworker = 0;
 	mt.numavail = 0;

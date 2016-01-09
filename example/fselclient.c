@@ -6,22 +6,8 @@
   This program can be distributed under the terms of the GNU GPL.
   See the file COPYING.
 
+  gcc -Wall fselclient.c -o fselclient
 */
-
-/** @file
- * @tableofcontents
- *
- * fselclient.c - FUSE fselclient: FUSE select example client
- *
- * \section section_compile compiling this example
- *
- * gcc -Wall fselclient.c -o fselclient
- *
- * \section section_source the complete source
- * \include fselclient.c
- */
-
-#include <config.h>
 
 #include <sys/select.h>
 #include <sys/time.h>

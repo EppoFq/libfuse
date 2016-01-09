@@ -4,38 +4,11 @@
 
   This program can be distributed under the terms of the GNU GPL.
   See the file COPYING.
+
+  gcc -Wall hello.c `pkg-config fuse --cflags --libs` -o hello
 */
 
-/** @file
- *
- * hello.c - minimal FUSE example featuring fuse_main usage
- *
- * \section section_compile compiling this example
- *
- * gcc -Wall hello.c `pkg-config fuse3 --cflags --libs` -o hello
- *
- * \section section_usage usage
- \verbatim
- % mkdir mnt
- % ./hello mnt        # program will vanish into the background
- % ls -la mnt
-   total 4
-   drwxr-xr-x 2 root root      0 Jan  1  1970 ./
-   drwxrwx--- 1 root vboxsf 4096 Jun 16 23:12 ../
-   -r--r--r-- 1 root root     13 Jan  1  1970 hello
- % cat mnt/hello
-   Hello World!
- % fusermount -u mnt
- \endverbatim
- *
- * \section section_source the complete source
- * \include hello.c
- */
-
-
-#define FUSE_USE_VERSION 30
-
-#include <config.h>
+#define FUSE_USE_VERSION 26
 
 #include <fuse.h>
 #include <stdio.h>
@@ -65,19 +38,17 @@ static int hello_getattr(const char *path, struct stat *stbuf)
 }
 
 static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-			 off_t offset, struct fuse_file_info *fi,
-			 enum fuse_readdir_flags flags)
+			 off_t offset, struct fuse_file_info *fi)
 {
 	(void) offset;
 	(void) fi;
-	(void) flags;
 
 	if (strcmp(path, "/") != 0)
 		return -ENOENT;
 
-	filler(buf, ".", NULL, 0, 0);
-	filler(buf, "..", NULL, 0, 0);
-	filler(buf, hello_path + 1, NULL, 0, 0);
+	filler(buf, ".", NULL, 0);
+	filler(buf, "..", NULL, 0);
+	filler(buf, hello_path + 1, NULL, 0);
 
 	return 0;
 }

@@ -7,11 +7,11 @@
   See the file COPYING.LIB.
 */
 
-#include "config.h"
 #include "cuse_lowlevel.h"
 #include "fuse_kernel.h"
 #include "fuse_i.h"
 #include "fuse_opt.h"
+#include "fuse_misc.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -170,12 +170,12 @@ struct fuse_session *cuse_lowlevel_new(struct fuse_args *args,
 	lop.ioctl	= clop->ioctl		? cuse_fll_ioctl	: NULL;
 	lop.poll	= clop->poll		? cuse_fll_poll		: NULL;
 
-	se = fuse_lowlevel_new(args, &lop, sizeof(lop), userdata);
+	se = fuse_lowlevel_new_common(args, &lop, sizeof(lop), userdata);
 	if (!se) {
 		free(cd);
 		return NULL;
 	}
-	ll = se->f;
+	ll = se->data;
 	ll->cuse_data = cd;
 
 	return se;
@@ -200,7 +200,7 @@ void cuse_lowlevel_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 	struct cuse_init_out outarg;
 	struct fuse_ll *f = req->f;
 	struct cuse_data *cd = f->cuse_data;
-	size_t bufsize = f->bufsize;
+	size_t bufsize = fuse_chan_bufsize(req->ch);
 	struct cuse_lowlevel_ops *clop = req_clop(req);
 
 	(void) nodeid;
@@ -313,7 +313,7 @@ struct fuse_session *cuse_lowlevel_setup(int argc, char *argv[],
 		goto err_se;
 	}
 
-	ch = fuse_chan_new(fd);
+	ch = fuse_kern_chan_new(fd);
 	if (!ch) {
 		close(fd);
 		goto err_se;

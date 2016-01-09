@@ -1,9 +1,9 @@
 ## Process this file with automake to produce Makefile.in
 
 AM_CPPFLAGS = -I$(top_srcdir)/include -DFUSERMOUNT_DIR=\"$(bindir)\" \
- -D_REENTRANT -DFUSE_USE_VERSION=30
+ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -DFUSE_USE_VERSION=26
 
-lib_LTLIBRARIES = libfuse3.la
+lib_LTLIBRARIES = libfuse.la libulockmgr.la
 
 if BSD
 mount_source = mount_bsd.c
@@ -17,9 +17,10 @@ else
 iconv_source =
 endif
 
-libfuse3_la_SOURCES = 		\
+libfuse_la_SOURCES = 		\
 	fuse.c			\
 	fuse_i.h		\
+	fuse_kern_chan.c	\
 	fuse_loop.c		\
 	fuse_loop_mt.c		\
 	fuse_lowlevel.c		\
@@ -35,11 +36,14 @@ libfuse3_la_SOURCES = 		\
 	$(iconv_source)		\
 	$(mount_source)
 
-libfuse3_la_LDFLAGS = -pthread @libfuse_libs@ -version-number 0:0:0 \
+libfuse_la_LDFLAGS = -pthread @libfuse_libs@ -version-number 2:9:4 \
 	-Wl,--version-script,$(srcdir)/fuse_versionscript
 
 if NETBSD
-libfuse3_la_LIBADD = -lperfuse -lpuffs
+libfuse_la_LIBADD = -lperfuse -lpuffs
 endif
+
+libulockmgr_la_SOURCES = ulockmgr.c
+libulockmgr_la_LDFLAGS = -pthread -version-number 1:0:1
 
 EXTRA_DIST = fuse_versionscript

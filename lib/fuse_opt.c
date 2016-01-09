@@ -6,7 +6,6 @@
   See the file COPYING.LIB
 */
 
-#include "config.h"
 #include "fuse_opt.h"
 #include "fuse_misc.h"
 
@@ -89,6 +88,13 @@ static int fuse_opt_insert_arg_common(struct fuse_args *args, int pos,
 }
 
 int fuse_opt_insert_arg(struct fuse_args *args, int pos, const char *arg)
+{
+	return fuse_opt_insert_arg_common(args, pos, arg);
+}
+
+int fuse_opt_insert_arg_compat(struct fuse_args *args, int pos,
+			       const char *arg);
+int fuse_opt_insert_arg_compat(struct fuse_args *args, int pos, const char *arg)
 {
 	return fuse_opt_insert_arg_common(args, pos, arg);
 }
@@ -205,13 +211,11 @@ static int process_opt_param(void *var, const char *format, const char *param,
 {
 	assert(format[0] == '%');
 	if (format[1] == 's') {
-		char **s = var;
 		char *copy = strdup(param);
 		if (!copy)
 			return alloc_failed();
 
-		free(*s);
-		*s = copy;
+		*(char **) var = copy;
 	} else {
 		if (sscanf(param, format, var) != 1) {
 			fprintf(stderr, "fuse: invalid parameter in option `%s'\n", arg);
@@ -417,3 +421,6 @@ int fuse_opt_parse(struct fuse_args *args, void *data,
 	fuse_opt_free_args(&ctx.outargs);
 	return res;
 }
+
+/* This symbol version was mistakenly added to the version script */
+FUSE_SYMVER(".symver fuse_opt_insert_arg_compat,fuse_opt_insert_arg@FUSE_2.5");
