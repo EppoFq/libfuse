@@ -6,9 +6,7 @@
   See the file COPYING.LIB
 */
 
-#define FUSE_USE_VERSION 30
-
-#include <config.h>
+#define FUSE_USE_VERSION 26
 
 #include <fuse.h>
 #include <stdio.h>
@@ -172,22 +170,20 @@ static int iconv_opendir(const char *path, struct fuse_file_info *fi)
 }
 
 static int iconv_dir_fill(void *buf, const char *name,
-			  const struct stat *stbuf, off_t off,
-			  enum fuse_fill_dir_flags flags)
+			  const struct stat *stbuf, off_t off)
 {
 	struct iconv_dh *dh = buf;
 	char *newname;
 	int res = 0;
 	if (iconv_convpath(dh->ic, name, &newname, 1) == 0) {
-		res = dh->prev_filler(dh->prev_buf, newname, stbuf, off, flags);
+		res = dh->prev_filler(dh->prev_buf, newname, stbuf, off);
 		free(newname);
 	}
 	return res;
 }
 
 static int iconv_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-			 off_t offset, struct fuse_file_info *fi,
-			 enum fuse_readdir_flags flags)
+			 off_t offset, struct fuse_file_info *fi)
 {
 	struct iconv *ic = iconv_get();
 	char *newpath;
@@ -198,7 +194,7 @@ static int iconv_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		dh.prev_buf = buf;
 		dh.prev_filler = filler;
 		err = fuse_fs_readdir(ic->next, newpath, &dh, iconv_dir_fill,
-				      offset, fi, flags);
+				      offset, fi);
 		free(newpath);
 	}
 	return err;
@@ -281,7 +277,7 @@ static int iconv_symlink(const char *from, const char *to)
 	return err;
 }
 
-static int iconv_rename(const char *from, const char *to, unsigned int flags)
+static int iconv_rename(const char *from, const char *to)
 {
 	struct iconv *ic = iconv_get();
 	char *newfrom;
@@ -290,7 +286,7 @@ static int iconv_rename(const char *from, const char *to, unsigned int flags)
 	if (!err) {
 		err = iconv_convpath(ic, to, &newto, 0);
 		if (!err) {
-			err = fuse_fs_rename(ic->next, newfrom, newto, flags);
+			err = fuse_fs_rename(ic->next, newfrom, newto);
 			free(newto);
 		}
 		free(newfrom);
@@ -635,6 +631,7 @@ static const struct fuse_operations iconv_oper = {
 	.flock		= iconv_flock,
 	.bmap		= iconv_bmap,
 
+	.flag_nullpath_ok = 1,
 	.flag_nopath = 1,
 };
 
@@ -652,7 +649,7 @@ static void iconv_help(void)
 	char *charmap = strdup(nl_langinfo(CODESET));
 	setlocale(LC_CTYPE, old);
 	free(old);
-	printf(
+	fprintf(stderr,
 "    -o from_code=CHARSET   original encoding of file names (default: UTF-8)\n"
 "    -o to_code=CHARSET	    new encoding of the file names (default: %s)\n",
 		charmap);

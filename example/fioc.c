@@ -6,25 +6,10 @@
   This program can be distributed under the terms of the GNU GPL.
   See the file COPYING.
 
+  gcc -Wall fioc.c `pkg-config fuse --cflags --libs` -o fioc
 */
 
-/** @file
- * @tableofcontents
- *
- * fioc.c - FUSE fioc: FUSE ioctl example
- *
- * \section section_compile compiling this example
- *
- * gcc -Wall fioc.c `pkg-config fuse3 --cflags --libs` -o fioc
- *
- * \section section_source the complete source
- * \include fioc.c
- */
-
-
-#define FUSE_USE_VERSION 30
-
-#include <config.h>
+#define FUSE_USE_VERSION 26
 
 #include <fuse.h>
 #include <stdlib.h>
@@ -169,19 +154,17 @@ static int fioc_truncate(const char *path, off_t size)
 }
 
 static int fioc_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-			off_t offset, struct fuse_file_info *fi,
-			enum fuse_readdir_flags flags)
+			off_t offset, struct fuse_file_info *fi)
 {
 	(void) fi;
 	(void) offset;
-	(void) flags;
 
 	if (fioc_file_type(path) != FIOC_ROOT)
 		return -ENOENT;
 
-	filler(buf, ".", NULL, 0, 0);
-	filler(buf, "..", NULL, 0, 0);
-	filler(buf, FIOC_NAME, NULL, 0, 0);
+	filler(buf, ".", NULL, 0);
+	filler(buf, "..", NULL, 0);
+	filler(buf, FIOC_NAME, NULL, 0);
 
 	return 0;
 }

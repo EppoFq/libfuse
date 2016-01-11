@@ -6,9 +6,7 @@
   See the file COPYING.LIB
 */
 
-#define FUSE_USE_VERSION 30
-
-#include <config.h>
+#define FUSE_USE_VERSION 26
 
 #include <fuse.h>
 #include <stdio.h>
@@ -181,15 +179,14 @@ static int subdir_opendir(const char *path, struct fuse_file_info *fi)
 
 static int subdir_readdir(const char *path, void *buf,
 			  fuse_fill_dir_t filler, off_t offset,
-			  struct fuse_file_info *fi,
-			  enum fuse_readdir_flags flags)
+			  struct fuse_file_info *fi)
 {
 	struct subdir *d = subdir_get();
 	char *newpath;
 	int err = subdir_addpath(d, path, &newpath);
 	if (!err) {
 		err = fuse_fs_readdir(d->next, newpath, buf, filler, offset,
-				      fi, flags);
+				      fi);
 		free(newpath);
 	}
 	return err;
@@ -267,7 +264,7 @@ static int subdir_symlink(const char *from, const char *path)
 	return err;
 }
 
-static int subdir_rename(const char *from, const char *to, unsigned int flags)
+static int subdir_rename(const char *from, const char *to)
 {
 	struct subdir *d = subdir_get();
 	char *newfrom;
@@ -276,7 +273,7 @@ static int subdir_rename(const char *from, const char *to, unsigned int flags)
 	if (!err) {
 		err = subdir_addpath(d, to, &newto);
 		if (!err) {
-			err = fuse_fs_rename(d->next, newfrom, newto, flags);
+			err = fuse_fs_rename(d->next, newfrom, newto);
 			free(newto);
 		}
 		free(newfrom);
@@ -617,6 +614,7 @@ static const struct fuse_operations subdir_oper = {
 	.flock		= subdir_flock,
 	.bmap		= subdir_bmap,
 
+	.flag_nullpath_ok = 1,
 	.flag_nopath = 1,
 };
 
@@ -631,7 +629,7 @@ static const struct fuse_opt subdir_opts[] = {
 
 static void subdir_help(void)
 {
-	printf(
+	fprintf(stderr,
 "    -o subdir=DIR	    prepend this directory to all paths (mandatory)\n"
 "    -o [no]rellinks	    transform absolute symlinks to relative\n");
 }

@@ -5,22 +5,11 @@
 
   This program can be distributed under the terms of the GNU GPL.
   See the file COPYING.
+
+  gcc -Wall fusexmp_fh.c `pkg-config fuse --cflags --libs` -lulockmgr -o fusexmp_fh
 */
 
-/** @file
- * @tableofcontents
- *
- * fusexmp_fh.c - FUSE: Filesystem in Userspace
- *
- * \section section_compile compiling this example
- *
- * gcc -Wall fusexmp_fh.c `pkg-config fuse3 --cflags --libs` -lulockmgr -o fusexmp_fh
- *
- * \section section_source the complete source
- * \include fusexmp_fh.c
- */
-
-#define FUSE_USE_VERSION 30
+#define FUSE_USE_VERSION 26
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
@@ -29,11 +18,7 @@
 #define _GNU_SOURCE
 
 #include <fuse.h>
-
-#ifdef HAVE_LIBULOCKMGR
 #include <ulockmgr.h>
-#endif
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -128,8 +113,7 @@ static inline struct xmp_dirp *get_dirp(struct fuse_file_info *fi)
 }
 
 static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-		       off_t offset, struct fuse_file_info *fi,
-		       enum fuse_readdir_flags flags)
+		       off_t offset, struct fuse_file_info *fi)
 {
 	struct xmp_dirp *d = get_dirp(fi);
 
@@ -142,30 +126,18 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	while (1) {
 		struct stat st;
 		off_t nextoff;
-		enum fuse_fill_dir_flags fill_flags = 0;
 
 		if (!d->entry) {
 			d->entry = readdir(d->dp);
 			if (!d->entry)
 				break;
 		}
-#ifdef HAVE_FSTATAT
-		if (flags & FUSE_READDIR_PLUS) {
-			int res;
 
-			res = fstatat(dirfd(d->dp), d->entry->d_name, &st,
-				      AT_SYMLINK_NOFOLLOW);
-			if (res != -1)
-				fill_flags |= FUSE_FILL_DIR_PLUS;
-		}
-#endif
-		if (!(fill_flags & FUSE_FILL_DIR_PLUS)) {
-			memset(&st, 0, sizeof(st));
-			st.st_ino = d->entry->d_ino;
-			st.st_mode = d->entry->d_type << 12;
-		}
+		memset(&st, 0, sizeof(st));
+		st.st_ino = d->entry->d_ino;
+		st.st_mode = d->entry->d_type << 12;
 		nextoff = telldir(d->dp);
-		if (filler(buf, d->entry->d_name, &st, nextoff, fill_flags))
+		if (filler(buf, d->entry->d_name, &st, nextoff))
 			break;
 
 		d->entry = NULL;
@@ -242,13 +214,9 @@ static int xmp_symlink(const char *from, const char *to)
 	return 0;
 }
 
-static int xmp_rename(const char *from, const char *to, unsigned int flags)
+static int xmp_rename(const char *from, const char *to)
 {
 	int res;
-
-	/* When we have renameat2() in libc, then we can implement flags */
-	if (flags)
-		return -EINVAL;
 
 	res = rename(from, to);
 	if (res == -1)
@@ -521,7 +489,6 @@ static int xmp_removexattr(const char *path, const char *name)
 }
 #endif /* HAVE_SETXATTR */
 
-#ifdef HAVE_LIBULOCKMGR
 static int xmp_lock(const char *path, struct fuse_file_info *fi, int cmd,
 		    struct flock *lock)
 {
@@ -530,7 +497,6 @@ static int xmp_lock(const char *path, struct fuse_file_info *fi, int cmd,
 	return ulockmgr_op(fi->fh, cmd, lock, &fi->lock_owner,
 			   sizeof(fi->lock_owner));
 }
-#endif
 
 static int xmp_flock(const char *path, struct fuse_file_info *fi, int op)
 {
@@ -585,10 +551,13 @@ static struct fuse_operations xmp_oper = {
 	.listxattr	= xmp_listxattr,
 	.removexattr	= xmp_removexattr,
 #endif
-#ifdef HAVE_LIBULOCKMGR
 	.lock		= xmp_lock,
-#endif
 	.flock		= xmp_flock,
+
+	.flag_nullpath_ok = 1,
+#if HAVE_UTIMENSAT
+	.flag_utime_omit_ok = 1,
+#endif
 };
 
 int main(int argc, char *argv[])

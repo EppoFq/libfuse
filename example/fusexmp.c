@@ -5,23 +5,11 @@
 
   This program can be distributed under the terms of the GNU GPL.
   See the file COPYING.
+
+  gcc -Wall fusexmp.c `pkg-config fuse --cflags --libs` -o fusexmp
 */
 
-/** @file
- * @tableofcontents
- *
- * fusexmp.c - FUSE: Filesystem in Userspace
- *
- * \section section_compile compiling this example
- *
- * gcc -Wall fusexmp.c `pkg-config fuse3 --cflags --libs` -o fusexmp
- *
- * \section section_source the complete source
- * \include fusexmp.c
- */
-
-
-#define FUSE_USE_VERSION 30
+#define FUSE_USE_VERSION 26
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
@@ -81,15 +69,13 @@ static int xmp_readlink(const char *path, char *buf, size_t size)
 
 
 static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-		       off_t offset, struct fuse_file_info *fi,
-		       enum fuse_readdir_flags flags)
+		       off_t offset, struct fuse_file_info *fi)
 {
 	DIR *dp;
 	struct dirent *de;
 
 	(void) offset;
 	(void) fi;
-	(void) flags;
 
 	dp = opendir(path);
 	if (dp == NULL)
@@ -100,7 +86,7 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		memset(&st, 0, sizeof(st));
 		st.st_ino = de->d_ino;
 		st.st_mode = de->d_type << 12;
-		if (filler(buf, de->d_name, &st, 0, 0))
+		if (filler(buf, de->d_name, &st, 0))
 			break;
 	}
 
@@ -172,12 +158,9 @@ static int xmp_symlink(const char *from, const char *to)
 	return 0;
 }
 
-static int xmp_rename(const char *from, const char *to, unsigned int flags)
+static int xmp_rename(const char *from, const char *to)
 {
 	int res;
-
-	if (flags)
-		return -EINVAL;
 
 	res = rename(from, to);
 	if (res == -1)

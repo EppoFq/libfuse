@@ -6,7 +6,6 @@
   See the file COPYING.LIB.
 */
 
-#include "config.h"
 #include "fuse_i.h"
 #include "fuse_misc.h"
 #include "fuse_opt.h"
@@ -102,7 +101,9 @@ static const struct fuse_opt fuse_mount_opts[] = {
 
 static void mount_help(void)
 {
-	printf("    -o allow_root          allow access to root\n");
+	fprintf(stderr,
+		"    -o allow_root          allow access to root\n"
+		);
 	system(FUSERMOUNT_PROG " --help");
 	fputc('\n', stderr);
 }
@@ -386,3 +387,5 @@ out:
 	free(mo.kernel_opts);
 	return res;
 }
+
+FUSE_SYMVER(".symver fuse_unmount_compat22,fuse_unmount@FUSE_2.2");

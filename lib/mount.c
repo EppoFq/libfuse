@@ -10,6 +10,7 @@
 #include "fuse_i.h"
 #include "fuse_misc.h"
 #include "fuse_opt.h"
+#include "fuse_common_compat.h"
 #include "mount_util.h"
 
 #include <stdio.h>
@@ -97,10 +98,6 @@ static const struct fuse_opt fuse_mount_opts[] = {
 	FUSE_OPT_KEY("large_read",		KEY_KERN_OPT),
 	FUSE_OPT_KEY("blksize=",		KEY_KERN_OPT),
 	FUSE_OPT_KEY("default_permissions",	KEY_KERN_OPT),
-	FUSE_OPT_KEY("context=",		KEY_KERN_OPT),
-	FUSE_OPT_KEY("fscontext=",		KEY_KERN_OPT),
-	FUSE_OPT_KEY("defcontext=",		KEY_KERN_OPT),
-	FUSE_OPT_KEY("rootcontext=",		KEY_KERN_OPT),
 	FUSE_OPT_KEY("max_read=",		KEY_KERN_OPT),
 	FUSE_OPT_KEY("max_read=",		FUSE_OPT_KEY_KEEP),
 	FUSE_OPT_KEY("user=",			KEY_MTAB_OPT),
@@ -127,7 +124,7 @@ static const struct fuse_opt fuse_mount_opts[] = {
 
 static void mount_help(void)
 {
-	printf(
+	fprintf(stderr,
 "    -o allow_other         allow access to other users\n"
 "    -o allow_root          allow access to root\n"
 "    -o auto_unmount        auto unmount on process termination\n"
@@ -281,7 +278,7 @@ static int receive_fd(int fd)
 	}
 
 	cmsg = CMSG_FIRSTHDR(&msg);
-	if (cmsg->cmsg_type != SCM_RIGHTS) {
+	if (!cmsg->cmsg_type == SCM_RIGHTS) {
 		fprintf(stderr, "got control message of unknown type %d\n",
 			cmsg->cmsg_type);
 		return -1;
@@ -293,6 +290,9 @@ void fuse_kern_unmount(const char *mountpoint, int fd)
 {
 	int res;
 	int pid;
+
+	if (!mountpoint)
+		return;
 
 	if (fd != -1) {
 		struct pollfd pfd;
@@ -335,6 +335,11 @@ void fuse_kern_unmount(const char *mountpoint, int fd)
 		_exit(1);
 	}
 	waitpid(pid, NULL, 0);
+}
+
+void fuse_unmount_compat22(const char *mountpoint)
+{
+	fuse_kern_unmount(mountpoint, -1);
 }
 
 static int fuse_mount_fusermount(const char *mountpoint, struct mount_opts *mo,
@@ -404,15 +409,17 @@ static int fuse_mount_fusermount(const char *mountpoint, struct mount_opts *mo,
 		waitpid(pid, NULL, 0); /* bury zombie */
 	}
 
-	if (rv >= 0)
-		fcntl(rv, F_SETFD, FD_CLOEXEC);
-
 	return rv;
 }
 
-#ifndef O_CLOEXEC
-#define O_CLOEXEC 0
-#endif
+int fuse_mount_compat22(const char *mountpoint, const char *opts)
+{
+	struct mount_opts mo;
+	memset(&mo, 0, sizeof(mo));
+	mo.flags = MS_NOSUID | MS_NODEV;
+
+	return fuse_mount_fusermount(mountpoint, &mo, opts, 0);
+}
 
 static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 			  const char *mnt_opts)
@@ -450,7 +457,7 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 		return -2;
 	}
 
-	fd = open(devname, O_RDWR | O_CLOEXEC);
+	fd = open(devname, O_RDWR);
 	if (fd == -1) {
 		if (errno == ENODEV || errno == ENOENT)
 			fprintf(stderr, "fuse: device not found, try 'modprobe fuse' first\n");
@@ -459,8 +466,6 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 				devname, strerror(errno));
 		return -1;
 	}
-	if (!O_CLOEXEC)
-		fcntl(fd, F_SETFD, FD_CLOEXEC);
 
 	snprintf(tmp, sizeof(tmp),  "fd=%i,rootmode=%o,user_id=%u,group_id=%u",
 		 fd, stbuf.st_mode & S_IFMT, getuid(), getgid());
@@ -630,3 +635,6 @@ out:
 	free(mo.mtab_opts);
 	return res;
 }
+
+FUSE_SYMVER(".symver fuse_mount_compat22,fuse_mount@FUSE_2.2");
+FUSE_SYMVER(".symver fuse_unmount_compat22,fuse_unmount@FUSE_2.2");

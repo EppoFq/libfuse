@@ -1,0 +1,80 @@
+//2016-01-11
+在虚拟机上编译exfat：
+1.拷贝toolchain到虚拟机，安装交叉编译器；
+  注：一定要用u盘而不是samba拷贝，因为samba拷贝解压会改变文件属性
+  以致无法正常安装。
+  安装完成后在该用户下：
+  source /etc/profile
+  echo $PATH
+  运行arm-hisiv300-linux-gcc -v查看是否安装成功
+2.编译libfuse，并安装到编译机上/usr/lib/fuse/*
+  1)下载fuse-2.9.4.tar.gz
+    https://github.com/libfuse/libfuse/releases
+    而不是https://github.com/EppoFq/libfuse，如果直接在该地址git clone
+    则需 If you're building from the git repository (instead of using 
+    a release tarball), you also need to run ./makeconf.sh to create 
+    the configure script
+  2）拷贝至虚拟机解压，编译
+     ./configure --host=arm-hisiv300-linux --prefix=/usr
+     make -j8
+     sudo -s 
+     source /etc/profile
+     echo $PATH
+     exit
+     sudo make install
+     编译成功后通过git提交到
+     https://github.com/EppoFq/libfuse/tree/peter-fuse-2.9.4
+   3）You may also need to add /usr/local/lib to /etc/ld.so.conf 
+      and/or run ldconfig.
+ 3.编译exfat
+   git clone https://github.com/relan/exfat.git
+   cd exfat
+   autoreconf --install
+   ./configure --host=arm-hisiv300-linux --prefix=/usr
+   修改Makefile:
+    将FUSE_LIBS = -pthread -lfuse
+    修改为：
+    FUSE_LIBS = -L/lib/usr -pthread -lfuse
+   make
+ 4.备份虚拟机文件D:\Virtual Machines
+ 这样编译出来，执行exfatfsck出现exfat-dev数据最前面6个字节丢失，猜测
+ 可能跟libfuse库编译不正确有关，最后面拷贝到目标板子上的libfuse.so.2
+ 可能是编译机器上的库
+3.重新编译libfuse，关键词"嵌入式libfuse"
+  参考http://tzaumin.blogspot.com/2015/01/linux-fuse-exfat.html
+  ./configure --prefix=$PWD/release --host='/opt/hisi-linux/x86-arm/
+  arm-hisiv300-linux/bin/arm-hisiv300-linux-uclibcgnueabi-gcc 
+  -dumpmachine' --enable-lib --enable-util --enable-example 
+  --exec-prefix=$PWD/release
+  1)在/etc/profile中添加环境变量
+    /opt/hisi-linux/x86-arm/arm-hisiv300-linux/target/bin
+  2)执行./configure 生成Makefile
+    ./configure --host=arm-hisiv300-linux-uclibcgnueabi 
+    --prefix=$PWD/release --enable-lib --enable-util 
+    --enable-example --exec-prefix=$PWD/release
+  3)拷贝生成的libs
+    mkdir release
+    mkdir release/lib
+    cp lib/.libs/libfuse* release/lib
+4.重新编译exfat
+  1)生成configure
+    autoreconf --install
+  2)生成Makefile
+    ./configure --host=arm-hisiv300-linux-uclibcgnueabi
+    --prefix=$PWD/release --enable-dump --enable-fsck
+    --enable-fuse --enable-label --enable-libexfat
+    --enable-mkfs --exec-prefix=$PWD/release
+    上面的错误，用下面的：
+    ./configure --host=arm-hisiv300-linux-uclibcgnueabi 
+    --prefix=$PWD/release --exec-prefix=$PWD/release
+  3)修改Makefile，exfat/Makefile, fuse/Makefile
+     #FUSE_CFLAGS = -D_FILE_OFFSET_BITS=64 -I/usr/include/fuse  
+     FUSE_CFLAGS = -D_FILE_OFFSET_BITS=64 -I/home/peter/share/fuse-2.9.4/include
+     #FUSE_LIBS = -pthread -lfuse  
+     FUSE_LIBS = -L/home/peter/share/fuse-2.9.4/release/lib -pthread -lfuse
+5.去除libexfat/io.c文件编译出现pread，pwrite未申明警告
+  #include <unistd.h>
+  在/etxfat/libexfat/io.c文件中第一行添加#define _GNU_SOURCE
+  去掉编译警告后一切都ok啦！！！
+6.在挂载exfat后fsck不可用，出现错误警告
+  ERROR: empty file marked as contiguous (0x3)

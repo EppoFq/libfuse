@@ -6,7 +6,6 @@
   See the file COPYING.LIB
 */
 
-#include "config.h"
 #include "fuse_lowlevel.h"
 
 #include <stdio.h>
@@ -15,14 +14,12 @@
 
 static struct fuse_session *fuse_instance;
 
-/*! [doxygen_exit_handler] */
 static void exit_handler(int sig)
 {
 	(void) sig;
 	if (fuse_instance)
 		fuse_session_exit(fuse_instance);
 }
-/*! [doxygen_exit_handler] */
 
 static int set_one_signal_handler(int sig, void (*handler)(int), int remove)
 {
